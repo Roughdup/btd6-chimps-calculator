@@ -330,13 +330,11 @@ Beast Handler,Pouaki,3,380,205,930,2290,9720,32400`;
                 dropdown.innerHTML = '';
                 dropdown.disabled = false;
 
-                // Add the current tier as the base option
                 const baseOption = document.createElement('option');
                 baseOption.value = currentTier;
                 baseOption.textContent = currentTier;
                 dropdown.appendChild(baseOption);
 
-                // Add higher tiers
                 for (let i = currentTier + 1; i <= 5; i++) {
                     const option = document.createElement('option');
                     option.value = i;
@@ -344,11 +342,9 @@ Beast Handler,Pouaki,3,380,205,930,2290,9720,32400`;
                     dropdown.appendChild(option);
                 }
 
-                // Crosspath restriction logic
                 const highTierPath = currentTiers.some(t => t > 2);
                 if (highTierPath && currentTiers[index] <= 2) {
-                     // If another path is already > T2, this path can't go beyond T2
-                     dropdown.innerHTML = ''; // Clear options
+                     dropdown.innerHTML = ''; 
                      for (let i=currentTier; i<=2; i++) {
                         const option = document.createElement('option');
                         option.value = i;
@@ -357,7 +353,6 @@ Beast Handler,Pouaki,3,380,205,930,2290,9720,32400`;
                      }
                 }
                 if (currentTiers[index] > 2) {
-                     // If this path is > T2, no other path can be upgraded
                      pathDropdowns.forEach((d, idx) => {
                          if (idx !== index) d.disabled = true;
                      });
@@ -392,8 +387,9 @@ Beast Handler,Pouaki,3,380,205,930,2290,9720,32400`;
                 id: Date.now(),
                 type: 'base',
                 tower: selectedTower,
-                path: pathTiers.join('-'),
-                totalCost: result.totalCost,
+                path: pathTiers.join('-'), // The display path for this transaction
+                cost: result.totalCost, // The cost of this specific transaction
+                totalCostForState: result.totalCost, // The running total for this tower's state
                 breakdown: result.breakdown,
             });
             
@@ -424,27 +420,27 @@ Beast Handler,Pouaki,3,380,205,930,2290,9720,32400`;
                 return;
             }
             
-            if (newTiers.join('-') === originalTower.path) {
+            const currentStatePath = originalTower.currentStatePath || originalTower.path;
+            if (newTiers.join('-') === currentStatePath) {
                 document.getElementById('update-error-message').textContent = "No new upgrades selected.";
                 return;
             }
 
             const newCostData = getCostBreakdown(originalTower.tower, newTiers);
-            const incrementalCost = newCostData.totalCost - originalTower.totalCost;
+            const incrementalCost = newCostData.totalCost - originalTower.totalCostForState;
 
-            // 1. Silent Update
-            originalTower.totalCost = newCostData.totalCost;
-            originalTower.path = newTiers.join('-');
-            originalTower.breakdown = newCostData.breakdown;
+            // Silent Update of the original tower's state for the *next* calculation
+            originalTower.currentStatePath = newTiers.join('-');
+            originalTower.totalCostForState = newCostData.totalCost;
 
-            // 2. Public Log
+            // Public Log of the incremental purchase
             calculationGrid.push({
                 id: Date.now(),
                 type: 'upgrade',
                 targetId: towerIdToUpdate,
                 description: `Upgrade: ${originalTower.tower} ${originalTower.sequence}`,
                 path: newTiers.join('-'),
-                incrementalCost: incrementalCost,
+                cost: incrementalCost, // The cost of this specific transaction
             });
 
             recalculateAndRender();
@@ -474,13 +470,12 @@ Beast Handler,Pouaki,3,380,205,930,2290,9720,32400`;
 
             const towerData = calculationGrid.find(e => e.id === towerId);
             if (towerData) {
-                const currentTiers = towerData.path.split('-').map(Number);
+                const currentTiers = (towerData.currentStatePath || towerData.path).split('-').map(Number);
                 populateUpdatePathDropdowns(currentTiers);
             }
         }
 
         function removeTower(id) {
-            // Remove the base tower AND all of its associated upgrades
             calculationGrid = calculationGrid.filter(entry => entry.id !== id && entry.targetId !== id);
             recalculateAndRender();
         }
@@ -492,20 +487,19 @@ Beast Handler,Pouaki,3,380,205,930,2290,9720,32400`;
             const towerCounts = {};
 
             calculationGrid.forEach(entry => {
-                if (entry.type === 'base') {
+                if (entry.type === 'base' && !entry.sequence) {
                     const towerName = entry.tower;
                     towerCounts[towerName] = (towerCounts[towerName] || 0) + 1;
                     entry.sequence = towerCounts[towerName];
-                    runningTotal += entry.totalCost;
-                } else if (entry.type === 'upgrade') {
-                    runningTotal += entry.incrementalCost;
                 }
+                
+                runningTotal += entry.cost;
                 entry.cumulativeCostAtAddition = runningTotal;
                 entry.earliestRound = calculateEarliestRound(runningTotal);
             });
             
             renderGrid();
-            populateUpdateTowerSelect(); // Keep the update dropdown in sync
+            populateUpdateTowerSelect(); 
         }
 
         function renderGrid() {
@@ -517,11 +511,10 @@ Beast Handler,Pouaki,3,380,205,930,2290,9720,32400`;
             let finalCumulativeTotal = 0;
             
             calculationGrid.forEach(entry => {
+                finalCumulativeTotal += entry.cost;
                 if (entry.type === 'base') {
-                    finalCumulativeTotal += entry.totalCost;
                     renderBaseTowerRow(entry);
                 } else if (entry.type === 'upgrade') {
-                    finalCumulativeTotal += entry.incrementalCost;
                     renderUpgradeRow(entry);
                 }
             });
@@ -529,7 +522,6 @@ Beast Handler,Pouaki,3,380,205,930,2290,9720,32400`;
             totalCostEl.textContent = finalCumulativeTotal.toLocaleString();
             earliestRoundEl.textContent = calculateEarliestRound(finalCumulativeTotal);
 
-            // This delegation is more efficient than adding a listener to every button.
             costGridBody.addEventListener('click', function(e) {
                 const removeButton = e.target.closest('.remove-btn');
                 if (removeButton) {
@@ -546,7 +538,7 @@ Beast Handler,Pouaki,3,380,205,930,2290,9720,32400`;
             mainRow.innerHTML = `
                 <td class="px-4 py-3 text-gray-100">${entry.tower} ${entry.sequence}</td>
                 <td class="px-4 py-3 text-center">${entry.path}</td>
-                <td class="px-4 py-3 text-right">${entry.totalCost.toLocaleString()}</td>
+                <td class="px-4 py-3 text-right">${entry.cost.toLocaleString()}</td>
                 <td class="px-4 py-3 text-center">
                     <button class="text-red-400 hover:text-red-600 remove-btn" data-id="${entry.id}">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clip-rule="evenodd" /></svg>
@@ -590,7 +582,7 @@ Beast Handler,Pouaki,3,380,205,930,2290,9720,32400`;
             upgradeRow.innerHTML = `
                 <td class="px-4 py-3 text-teal-300 italic">${entry.description}</td>
                 <td class="px-4 py-3 text-center text-teal-300">${entry.path}</td>
-                <td class="px-4 py-3 text-right text-teal-300 font-mono">+${entry.incrementalCost.toLocaleString()}</td>
+                <td class="px-4 py-3 text-right text-teal-300 font-mono">+${entry.cost.toLocaleString()}</td>
                 <td class="px-4 py-3 text-center">
                     <div class="flex justify-between items-center text-teal-400/90">
                         <span class="italic text-xs">Round:</span>
@@ -606,7 +598,6 @@ Beast Handler,Pouaki,3,380,205,930,2290,9720,32400`;
             parseData();
             populateTowerSelect();
             
-            // Event Listeners
             document.getElementById('add-tower-btn').addEventListener('click', handleAddTower);
             document.getElementById('update-tower-btn').addEventListener('click', handleUpdateTower);
             document.getElementById('update-tower-select').addEventListener('change', handleUpdateSelectChange);
@@ -622,4 +613,3 @@ Beast Handler,Pouaki,3,380,205,930,2290,9720,32400`;
     </script>
 </body>
 </html>
-
